@@ -1,0 +1,1802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Symmetry Crop Tool</title>
+<style>
+  :root{
+    --bg: #010216;
+    --panel: #ffffff08;
+    --line: #ffffff2e;
+    --ink: #e7edf2;
+    --ink-dim: #8fa4b3;
+    --accent: #FBFF2D;
+    --accent-dim: #FBFF2D33;
+    --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --sans: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    min-height:100vh;
+    padding:28px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+  header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom:1px solid var(--line);
+    padding-bottom:14px;
+    margin-bottom:22px;
+  }
+  h1{
+    font-size:15px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    font-weight:600;
+    margin:0;
+    color:var(--ink);
+  }
+  h1 span{color:var(--accent);}
+  .subtitle{font-size:11px;color:var(--ink-dim);font-family:var(--mono);letter-spacing:0.02em;}
+  .grid{
+    display:grid;
+    grid-template-columns: 1fr 300px;
+    gap:20px;
+  }
+  @media (max-width:880px){ .grid{grid-template-columns:1fr;} }
+  .col{
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+  }
+  @media (min-width:1201px){
+    .col-media{
+      flex-direction:row;
+      align-items:flex-start;
+    }
+    .col-media > .panel{
+      flex:1;
+      min-width:0; /* let flex children shrink below content size instead of overflowing */
+      position:sticky;
+      top:28px; /* matches body's own padding, so it lines up with the page edge */
+      align-self:flex-start;
+    }
+  }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:2px;
+    padding:16px;
+    backdrop-filter: blur(2px);
+  }
+  .label{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--ink-dim);
+    margin-bottom:10px;
+    display:flex;
+    justify-content:space-between;
+  }
+
+  /* upload state */
+  .dropzone{
+    border:1px dashed var(--line);
+    border-radius:2px;
+    min-height:420px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:10px;
+    cursor:pointer;
+    color:var(--ink-dim);
+    font-family:var(--mono);
+    font-size:12px;
+    text-align:center;
+    transition:border-color .15s ease, color .15s ease;
+  }
+  .dropzone:hover{border-color:var(--accent); color:var(--ink);}
+  .dropzone svg{opacity:.5;}
+  .dropzone.drag{border-color:var(--accent); color:var(--accent); background:var(--accent-dim);}
+
+  /* canvas stage */
+  .stage{
+    position:relative;
+    display:none;
+    justify-content:center;
+    align-items:center;
+    min-height:420px;
+    overflow:hidden;
+    background:
+      repeating-conic-gradient(#010216 0% 25%, #0a0b1f 0% 50%) 50%/16px 16px;
+    border:1px solid var(--line);
+  }
+  .stage.active{display:flex;}
+  .canvas-wrap{
+    position:relative;
+    display:inline-block;
+    line-height:0; /* kill inline canvas baseline gap */
+  }
+  #sourceCanvas{display:block;}
+  .crop-box{
+    position:absolute;
+    border:1px solid var(--accent);
+    box-shadow: 0 0 0 2000px rgba(13,27,42,0.62);
+    cursor:move;
+  }
+  .crop-box::before, .crop-box::after{
+    content:"";
+    position:absolute;
+    background:var(--accent-dim);
+  }
+  .crop-box .grid-line{
+    position:absolute;
+    background:rgba(251,255,45,0.35);
+  }
+  .sym-source-overlay{
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:100%;
+    background:var(--accent-dim);
+    pointer-events:none;
+    display:none;
+  }
+  .sym-source-overlay.show-x{ display:block; width:50%; height:100%; }
+  .sym-source-overlay.show-y{ display:block; width:100%; height:50%; }
+  .handle{
+    position:absolute;
+    width:10px;height:10px;
+    background:var(--accent);
+    border:1px solid var(--bg);
+  }
+  .handle.nw{top:-5px;left:-5px;cursor:nwse-resize;}
+  .handle.ne{top:-5px;right:-5px;cursor:nesw-resize;}
+  .handle.sw{bottom:-5px;left:-5px;cursor:nesw-resize;}
+  .handle.se{bottom:-5px;right:-5px;cursor:nwse-resize;}
+  .readout{
+    position:absolute;
+    top:-22px;
+    left:0;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--accent);
+    white-space:nowrap;
+    letter-spacing:0.03em;
+  }
+
+  /* controls */
+  .field{margin-bottom:18px;}
+  .row{display:flex;gap:8px;}
+  .row input[type=number]{
+    width:100%;
+    background:#010216;
+    border:1px solid var(--line);
+    color:var(--ink);
+    font-family:var(--mono);
+    font-size:12px;
+    padding:7px 8px;
+    border-radius:2px;
+  }
+  .row input[type=number]:focus{outline:none; border-color:var(--accent);}
+  .aspect-row{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;}
+  .aspect-row .chip{font-size:9px; padding:4px 6px;}
+  .side-row{display:flex;gap:6px;margin-top:8px;}
+  .side-row .chip{flex:1; text-align:center;}
+  .crop-res-hint{
+    display:flex;
+    justify-content:space-between;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--ink-dim);
+    margin-top:10px;
+    padding-top:10px;
+    border-top:1px solid var(--line);
+  }
+  .crop-res-hint #cropPctHint.low{color:var(--accent);}
+  .chip{
+    display:inline-block;
+    font-family:var(--mono);
+    font-size:10px;
+    padding:5px 9px;
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    background:transparent;
+    cursor:pointer;
+    border-radius:2px;
+    letter-spacing:0.03em;
+  }
+  .chip:hover{color:var(--ink); border-color:var(--ink-dim);}
+  .chip.active{color:#010216; background:var(--accent); border-color:var(--accent);}
+
+  .sym-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:8px;
+  }
+  .sym-btn{
+    background:#010216;
+    border:1px solid var(--line);
+    border-radius:2px;
+    padding:12px 8px;
+    cursor:pointer;
+    color:var(--ink-dim);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.06em;
+  }
+  .sym-btn:hover{border-color:var(--ink-dim); color:var(--ink);}
+  .sym-btn.active{border-color:var(--accent); color:var(--accent); background:var(--accent-dim);}
+  .sym-btn svg{width:28px;height:28px;}
+
+  /* color panel */
+  .subhead{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 0;
+    border-bottom:1px solid var(--line);
+    margin-bottom:12px;
+  }
+  .subhead .subhead-title{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--ink);
+  }
+  .switch{
+    position:relative;
+    display:inline-block;
+    width:34px;
+    height:18px;
+    flex-shrink:0;
+  }
+  .switch input{opacity:0; width:0; height:0;}
+  .switch-track{
+    position:absolute;
+    cursor:pointer;
+    inset:0;
+    background:#010216;
+    border:1px solid var(--line);
+    border-radius:20px;
+    transition:.15s;
+  }
+  .switch-track::before{
+    content:"";
+    position:absolute;
+    width:12px; height:12px;
+    left:2px; top:2px;
+    background:var(--ink-dim);
+    border-radius:50%;
+    transition:.15s;
+  }
+  .switch input:checked + .switch-track{background:var(--accent-dim); border-color:var(--accent);}
+  .switch input:checked + .switch-track::before{transform:translateX(16px); background:var(--accent);}
+
+  .color-section{margin-bottom:20px;}
+  .color-section:last-child{margin-bottom:0;}
+  .color-section.disabled .section-body{opacity:0.35; pointer-events:none;}
+
+  .slider-row{margin-bottom:14px;}
+  .slider-row .slider-label{
+    display:flex;
+    justify-content:space-between;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--ink-dim);
+    margin-bottom:6px;
+    letter-spacing:0.04em;
+  }
+  .slider-row .slider-label span.val{color:var(--accent);}
+  input[type=range]{
+    width:100%;
+    accent-color:var(--accent);
+    height:16px;
+  }
+
+  .swatch-row{
+    display:flex;
+    gap:6px;
+    margin-bottom:14px;
+  }
+  .swatch{
+    width:30px;height:30px;
+    border-radius:2px;
+    border:1px solid var(--line);
+    cursor:pointer;
+    padding:0;
+    flex:1;
+  }
+  .swatch.active{outline:2px solid var(--accent); outline-offset:1px;}
+
+  .toggle-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--ink-dim);
+    margin-top:10px;
+  }
+
+  .color-picker-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:14px;
+  }
+  input[type=color]{
+    width:36px; height:30px;
+    border:1px solid var(--line);
+    border-radius:2px;
+    background:#010216;
+    padding:2px;
+    cursor:pointer;
+  }
+  .color-btn{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:2px;
+    padding:8px 12px;
+    cursor:pointer;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.03em;
+    color:var(--ink-dim);
+  }
+  .color-btn:hover{border-color:var(--ink-dim); color:var(--ink);}
+  .color-btn-swatch{
+    width:22px; height:22px;
+    flex-shrink:0;
+    border-radius:2px;
+    border:1px solid var(--line);
+  }
+  input[type=color].color-input-hidden{
+    position:absolute;
+    width:1px; height:1px;
+    padding:0; margin:-1px;
+    overflow:hidden;
+    clip:rect(0,0,0,0);
+    white-space:nowrap;
+    border:0;
+  }
+  select#blendMode{
+    flex:1;
+    background:#010216;
+    border:1px solid var(--line);
+    color:var(--ink);
+    font-family:var(--mono);
+    font-size:11px;
+    padding:6px 8px;
+    border-radius:2px;
+  }
+
+
+  .output-wrap{
+  }
+  #outputCanvas{
+    width:100%;
+    display:block;
+    background:
+      repeating-conic-gradient(#010216 0% 25%, #0a0b1f 0% 50%) 50%/16px 16px;
+    border:1px solid var(--line);
+  }
+  .dims{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--ink-dim);
+    margin-top:8px;
+    display:flex;
+    justify-content:space-between;
+  }
+  .download-btn{
+    width:100%;
+    margin-top:10px;
+    background:var(--accent);
+    color:#010216;
+    border:none;
+    padding:11px;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    font-weight:700;
+    cursor:pointer;
+    border-radius:2px;
+  }
+  .download-btn:disabled{background:var(--line); color:var(--ink-dim); cursor:not-allowed;}
+  .download-btn:not(:disabled):hover{filter:brightness(1.08);}
+  .record-hint{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--ink-dim);
+    margin-top:8px;
+    text-align:center;
+    min-height:12px;
+  }
+
+  .reset-link{
+    display:block;
+    text-align:center;
+    margin-top:10px;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--ink-dim);
+    cursor:pointer;
+    text-decoration:underline;
+  }
+  .reset-link:hover{color:var(--ink);}
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Symmetry<span>·</span>Crop</h1>
+    <div class="subtitle">brand asset tool — full-res output</div>
+  </header>
+
+  <div class="grid">
+    <div class="col col-media">
+    <div class="panel" id="sourcePanel">
+      <div class="label">
+        <span>01 — Source & Crop</span>
+        <span style="display:flex; align-items:center; gap:10px;">
+          <span id="fileMeta"></span>
+          <label class="chip" for="changeFileInput" id="changeImageBtn" style="display:none;">change image</label>
+        </span>
+      </div>
+      <label class="dropzone" for="fileInput" id="dropzone">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <div>drop an image, or click to browse</div>
+        <div style="opacity:.6">png / jpg / webp — high-res recommended</div>
+      </label>
+      <div class="stage" id="stage">
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="sourceCanvas"></canvas>
+          <div class="crop-box" id="cropBox">
+            <div class="sym-source-overlay" id="symSourceOverlay"></div>
+            <div class="readout" id="readout">0 × 0 @ 0,0</div>
+            <div class="grid-line" style="left:33.33%; top:0; width:1px; height:100%;"></div>
+            <div class="grid-line" style="left:66.66%; top:0; width:1px; height:100%;"></div>
+            <div class="grid-line" style="top:33.33%; left:0; height:1px; width:100%;"></div>
+            <div class="grid-line" style="top:66.66%; left:0; height:1px; width:100%;"></div>
+            <div class="handle nw"></div>
+            <div class="handle ne"></div>
+            <div class="handle sw"></div>
+            <div class="handle se"></div>
+          </div>
+        </div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*">
+      <input type="file" id="changeFileInput" accept="image/*">
+    </div>
+
+      <div class="panel output-wrap">
+        <div class="label">02 — Output</div>
+        <canvas id="outputCanvas"></canvas>
+        <div class="dims"><span id="outDims">— × —</span><span id="outSym">none</span></div>
+        <div class="scale-row" id="scaleRow" style="display:flex; gap:6px; margin-top:10px;">
+          <button class="chip active" data-scale="1">1×</button>
+          <button class="chip" data-scale="2">2×</button>
+          <button class="chip" data-scale="3">3×</button>
+          <button class="chip" data-scale="4">4×</button>
+        </div>
+        <div class="dims" style="margin-top:6px; justify-content:flex-start; gap:6px;">
+          <span>exports at</span><span id="exportDims">— × —</span>
+        </div>
+        <button class="download-btn" id="downloadBtn" disabled>Download PNG</button>
+        <div class="reset-link" id="resetLink">start over</div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <div class="label">03 — Crop, px</div>
+        <div class="field">
+          <div class="row">
+            <input type="number" id="cw" placeholder="W">
+            <input type="number" id="ch" placeholder="H">
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <input type="number" id="cx" placeholder="X">
+            <input type="number" id="cy" placeholder="Y">
+          </div>
+          <div class="aspect-row">
+            <button class="chip" data-ratio="0">free</button>
+            <button class="chip" data-ratio="1">1:1</button>
+            <button class="chip" data-ratio="1.333">4:3</button>
+            <button class="chip" data-ratio="0.75">3:4</button>
+            <button class="chip" data-ratio="1.778">16:9</button>
+            <button class="chip" data-ratio="0.5625">9:16</button>
+          </div>
+          <div class="crop-res-hint" id="cropResHint">
+            <span id="cropPxHint">— × —px</span>
+            <span id="cropPctHint">— of source</span>
+          </div>
+        </div>
+
+        <div class="label" style="margin-top:4px;">04 — Symmetry</div>
+        <div class="sym-grid">
+          <button class="sym-btn active" data-sym="none">
+            <svg viewBox="0 0 28 28"><rect x="4" y="4" width="20" height="20" fill="none" stroke="currentColor"/></svg>
+            none
+          </button>
+          <button class="sym-btn" data-sym="x">
+            <svg viewBox="0 0 28 28"><rect x="4" y="4" width="20" height="20" fill="none" stroke="currentColor"/><line x1="14" y1="4" x2="14" y2="24" stroke="currentColor" stroke-dasharray="2,2"/></svg>
+            X mirror
+          </button>
+          <button class="sym-btn" data-sym="y">
+            <svg viewBox="0 0 28 28"><rect x="4" y="4" width="20" height="20" fill="none" stroke="currentColor"/><line x1="4" y1="14" x2="24" y2="14" stroke="currentColor" stroke-dasharray="2,2"/></svg>
+            Y mirror
+          </button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="label">05 — Color</div>
+
+        <div class="color-section disabled" id="section-tone">
+          <div class="subhead">
+            <span class="subhead-title">Tone</span>
+            <label class="switch">
+              <input type="checkbox" id="toneToggle">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="section-body">
+            <div class="slider-row">
+              <div class="slider-label"><span>brightness</span><span class="val" id="valBrightness">0</span></div>
+              <input type="range" id="sliderBrightness" min="-100" max="100" value="0">
+            </div>
+            <div class="slider-row">
+              <div class="slider-label"><span>contrast</span><span class="val" id="valContrast">0</span></div>
+              <input type="range" id="sliderContrast" min="-100" max="100" value="0">
+            </div>
+            <div class="slider-row" style="margin-bottom:0;">
+              <div class="slider-label"><span>saturation</span><span class="val" id="valSaturation">0</span></div>
+              <input type="range" id="sliderSaturation" min="-100" max="100" value="0">
+            </div>
+          </div>
+        </div>
+
+        <div class="color-section disabled" id="section-overlay">
+          <div class="subhead">
+            <span class="subhead-title">Overlay</span>
+            <label class="switch">
+              <input type="checkbox" id="overlayToggle">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="section-body">
+            <div class="color-picker-row">
+              <input type="color" id="overlayColor" value="#ff8a34">
+              <select id="blendMode">
+                <option value="multiply">Multiply</option>
+                <option value="overlay">Overlay</option>
+                <option value="screen">Screen</option>
+                <option value="color">Color</option>
+                <option value="soft-light">Soft light</option>
+              </select>
+            </div>
+            <div class="slider-label"><span>dominant colors — click to use</span></div>
+            <div class="swatch-row" id="dominantSwatches"></div>
+            <div class="slider-row" style="margin-bottom:0;">
+              <div class="slider-label"><span>intensity</span><span class="val" id="valIntensity">0</span></div>
+              <input type="range" id="sliderIntensity" min="0" max="100" value="0">
+            </div>
+          </div>
+        </div>
+
+        <div class="color-section disabled" id="section-grain">
+          <div class="subhead">
+            <span class="subhead-title">Grain</span>
+            <label class="switch">
+              <input type="checkbox" id="grainToggle">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="section-body">
+            <div class="slider-row">
+              <div class="slider-label"><span>intensity</span><span class="val" id="valGrainIntensity">30</span></div>
+              <input type="range" id="sliderGrainIntensity" min="0" max="100" value="30">
+            </div>
+            <div class="slider-row" style="margin-bottom:0;">
+              <div class="slider-label"><span>grain size, px</span><span class="val" id="valGrainSize">1</span></div>
+              <input type="range" id="sliderGrainSize" min="1" max="2" step="0.1" value="1">
+            </div>
+            <div class="slider-row" style="margin-top:14px;">
+              <div class="slider-label"><span>loop length, sec</span><span class="val" id="valGrainDuration">2</span></div>
+              <input type="range" id="sliderGrainDuration" min="1" max="5" step="0.5" value="2">
+            </div>
+            <div class="field" style="margin-top:14px; margin-bottom:0;">
+              <div class="slider-label"><span>framerate, fps</span></div>
+              <div class="row">
+                <input type="number" id="grainFpsInput" min="2" max="10" value="8">
+              </div>
+            </div>
+            <button class="chip" id="previewGrainBtn" style="width:100%; margin-top:14px; padding:10px;" disabled>▶ preview live</button>
+            <button class="download-btn" id="recordGrainBtn" style="margin-top:8px; margin-bottom:0;" disabled>Record grain loop (.webm)</button>
+            <div class="record-hint" id="recordHint"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="label">06 — Distort</div>
+
+        <div class="color-section disabled" id="section-fisheye">
+          <div class="subhead">
+            <span class="subhead-title">Fisheye</span>
+            <label class="switch">
+              <input type="checkbox" id="fisheyeToggle">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="section-body">
+            <div class="slider-row" style="margin-bottom:0;">
+              <div class="slider-label"><span>pincushion</span><span class="val" id="valFisheye">40</span></div>
+              <input type="range" id="sliderFisheye" min="0" max="100" value="40">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="label">07 — Accent Border</div>
+
+        <div class="color-section disabled" id="section-accent">
+          <div class="subhead">
+            <span class="subhead-title">Border</span>
+            <label class="switch">
+              <input type="checkbox" id="accentToggle">
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="section-body">
+            <div class="color-picker-row">
+              <label class="color-btn" for="accentColorPicker">
+                <span class="color-btn-swatch" id="accentColorSwatch"></span>
+                <span>pick custom colour</span>
+              </label>
+              <input type="color" id="accentColorPicker" value="#FBFF2D" class="color-input-hidden">
+            </div>
+            <div class="slider-label"><span>most vibrant colors — click to use</span></div>
+            <div class="swatch-row" id="vibrantSwatches"></div>
+            <div class="slider-row">
+              <div class="slider-label"><span>saturation</span><span class="val" id="valAccentSat">0</span></div>
+              <input type="range" id="sliderAccentSat" min="-100" max="100" value="0">
+            </div>
+            <div class="slider-row" style="margin-bottom:0;">
+              <div class="slider-label"><span>luminance</span><span class="val" id="valAccentLum">0</span></div>
+              <input type="range" id="sliderAccentLum" min="-100" max="100" value="0">
+            </div>
+            <div class="slider-label" style="margin-top:14px;"><span>sides — click to toggle, any combination</span></div>
+            <div class="side-row" id="accentSideRow">
+              <button class="chip" data-side="top">top</button>
+              <button class="chip" data-side="right">right</button>
+              <button class="chip active" data-side="bottom">bottom</button>
+              <button class="chip" data-side="left">left</button>
+            </div>
+            <div class="slider-row" style="margin-top:14px;">
+              <div class="slider-label"><span>width</span><span class="val" id="valAccentWidth">20</span></div>
+              <input type="range" id="sliderAccentWidth" min="1" max="200" value="20">
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <div class="row">
+                <input type="number" id="accentWidthInput" min="1" max="200" value="20">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const stage = document.getElementById('stage');
+  const sourceCanvas = document.getElementById('sourceCanvas');
+  const sctx = sourceCanvas.getContext('2d');
+  const cropBox = document.getElementById('cropBox');
+  const readout = document.getElementById('readout');
+  const fileMeta = document.getElementById('fileMeta');
+  const sourcePanel = document.getElementById('sourcePanel');
+  const outputCanvas = document.getElementById('outputCanvas');
+  const octx = outputCanvas.getContext('2d');
+  const outDims = document.getElementById('outDims');
+  const outSym = document.getElementById('outSym');
+  const exportDims = document.getElementById('exportDims');
+  const scaleRow = document.getElementById('scaleRow');
+
+  let downloadScale = 1;
+  function updateExportDimsHint(){
+    exportDims.textContent = `${outputCanvas.width * downloadScale} × ${outputCanvas.height * downloadScale}px`;
+  }
+  document.querySelectorAll('#scaleRow [data-scale]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#scaleRow [data-scale]').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      downloadScale = +chip.dataset.scale;
+      updateExportDimsHint();
+    });
+  });
+
+  // The source preview's working resolution must match its actual rendered
+  // width in CSS pixels 1:1 — the crop box is positioned with plain px values
+  // assuming that, so if the canvas is ever CSS-scaled independently of its
+  // pixel attributes, the crop overlay drifts out of alignment (this bit us
+  // once already). Measuring the panel here, rather than a fixed constant,
+  // is what makes the side-by-side layout at wide viewports safe.
+  function getStageMaxDims(){
+    const panelPaddingX = 32; // .panel has 16px padding on each side
+    const availW = sourcePanel ? sourcePanel.clientWidth - panelPaddingX : 620;
+    const maxW = Math.max(240, Math.min(availW, 900));
+    const maxH = 460;
+    return {maxW, maxH};
+  }
+  const downloadBtn = document.getElementById('downloadBtn');
+  const resetLink = document.getElementById('resetLink');
+  const cwInput = document.getElementById('cw');
+  const chInput = document.getElementById('ch');
+  const cxInput = document.getElementById('cx');
+  const cyInput = document.getElementById('cy');
+  const cropPxHint = document.getElementById('cropPxHint');
+  const cropPctHint = document.getElementById('cropPctHint');
+
+  let img = null;
+  let natW = 0, natH = 0;      // natural image size
+  let dispScale = 1;           // natural -> displayed px
+  let crop = {x:0,y:0,w:0,h:0}; // in NATURAL px
+  let symmetry = 'none';
+  let aspectLock = 0; // 0 = free
+
+  let toneEnabled = false;
+  let overlayEnabled = false;
+  let grainEnabled = false;
+  let tone = {brightness:0, contrast:0, saturation:0};
+  let overlay = {color:'#ff8a34', blend:'multiply', intensity:0};
+  let grain = {intensity:30, size:1, duration:2, fps:8};
+  let grainCache = {canvas:null, key:''};
+  let fisheyeEnabled = false;
+  let fisheye = {strength:-40};
+  let accentEnabled = false;
+  let accent = {color:'#FBFF2D', satShift:0, lumShift:0, width:20, sides:{top:false,right:false,bottom:true,left:false}};
+
+  const MIN_CROP = 16;
+
+  const changeImageBtn = document.getElementById('changeImageBtn');
+  const changeFileInput = document.getElementById('changeFileInput');
+
+  // ---------- file loading ----------
+  // dropzone/changeImageBtn are <label for="..."> elements — the browser opens
+  // the file picker natively on click, no scripted .click() needed (and scripted
+  // .click() on a file input is exactly what sandboxed contexts tend to block).
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], false);
+  });
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0], false); });
+
+  changeFileInput.addEventListener('change', e => {
+    if (e.target.files[0]) loadFile(e.target.files[0], true);
+    changeFileInput.value = '';
+  });
+
+  function loadFile(file, isChange){
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const image = new Image();
+      image.onload = () => { isChange ? changeImage(image) : setImage(image); };
+      image.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // swap the source image only — crop, symmetry, tone, and overlay settings are preserved
+  function changeImage(image){
+    img = image;
+    natW = image.naturalWidth;
+    natH = image.naturalHeight;
+
+    const {maxW, maxH} = getStageMaxDims();
+    dispScale = Math.min(maxW / natW, maxH / natH, 1);
+    const dw = Math.round(natW * dispScale);
+    const dh = Math.round(natH * dispScale);
+
+    sourceCanvas.width = dw;
+    sourceCanvas.height = dh;
+    sctx.drawImage(image, 0, 0, dw, dh);
+    fileMeta.textContent = `${natW}×${natH}px`;
+
+    // existing crop rect is kept as-is, just clamped to the new image's bounds
+    clampCrop();
+    syncCropBoxFromModel();
+    updateInputs();
+
+    // dominant/vibrant swatches reflect the new image; chosen colors/shifts/grain untouched
+    populateDominantSwatches(image);
+    populateVibrantSwatches(image);
+
+    renderOutput();
+    updateRecordBtnState();
+  }
+
+  function setImage(image){
+    img = image;
+    natW = image.naturalWidth;
+    natH = image.naturalHeight;
+
+    const {maxW, maxH} = getStageMaxDims();
+    dispScale = Math.min(maxW / natW, maxH / natH, 1);
+    const dw = Math.round(natW * dispScale);
+    const dh = Math.round(natH * dispScale);
+
+    sourceCanvas.width = dw;
+    sourceCanvas.height = dh;
+    sctx.drawImage(image, 0, 0, dw, dh);
+
+    dropzone.style.display = 'none';
+    stage.classList.add('active');
+    changeImageBtn.style.display = 'inline-block';
+    fileMeta.textContent = `${natW}×${natH}px`;
+
+    // default crop: centered square-ish, 60% of smaller dimension
+    const size = Math.round(Math.min(natW, natH) * 0.6);
+    crop = {
+      x: Math.round((natW - size) / 2),
+      y: Math.round((natH - size) / 2),
+      w: size,
+      h: size
+    };
+    aspectLock = 1;
+    document.querySelectorAll('.aspect-row [data-ratio]').forEach(c => c.classList.toggle('active', c.dataset.ratio === '1'));
+
+    // reset color controls for a fresh initial upload
+    toneEnabled = false;
+    overlayEnabled = false;
+    grainEnabled = false;
+    fisheyeEnabled = false;
+    accentEnabled = false;
+    tone = {brightness:0, contrast:0, saturation:0};
+    overlay = {color:'#ff8a34', blend:'multiply', intensity:0};
+    grain = {intensity:30, size:1, duration:2, fps:8};
+    fisheye = {strength:-40};
+    accent = {color:'#FBFF2D', satShift:0, lumShift:0, width:20, sides:{top:false,right:false,bottom:true,left:false}};
+    setToneEnabled(false);
+    setOverlayEnabled(false);
+    setGrainEnabled(false);
+    setFisheyeEnabled(false);
+    setAccentEnabled(false);
+    syncToneSliders();
+    syncGrainSliders();
+    syncFisheyeSlider();
+    syncAccentSliders();
+    sliderIntensity.value = 0;
+    valIntensity.textContent = 0;
+
+    populateDominantSwatches(image);
+    populateVibrantSwatches(image);
+
+    syncCropBoxFromModel();
+    updateInputs();
+    renderOutput();
+    updateRecordBtnState();
+  }
+
+  // ---------- crop box <-> model ----------
+  function natToDisp(v){ return v * dispScale; }
+  function dispToNat(v){ return v / dispScale; }
+
+  function clampCrop(){
+    crop.w = Math.max(MIN_CROP, Math.min(crop.w, natW));
+    crop.h = Math.max(MIN_CROP, Math.min(crop.h, natH));
+    crop.x = Math.max(0, Math.min(crop.x, natW - crop.w));
+    crop.y = Math.max(0, Math.min(crop.y, natH - crop.h));
+  }
+
+  function syncCropBoxFromModel(){
+    clampCrop();
+    cropBox.style.left = natToDisp(crop.x) + 'px';
+    cropBox.style.top = natToDisp(crop.y) + 'px';
+    cropBox.style.width = natToDisp(crop.w) + 'px';
+    cropBox.style.height = natToDisp(crop.h) + 'px';
+    readout.textContent = `${Math.round(crop.w)} × ${Math.round(crop.h)} @ ${Math.round(crop.x)},${Math.round(crop.y)}`;
+  }
+
+  function updateInputs(){
+    cwInput.value = Math.round(crop.w);
+    chInput.value = Math.round(crop.h);
+    cxInput.value = Math.round(crop.x);
+    cyInput.value = Math.round(crop.y);
+    updateCropResHint();
+  }
+
+  function updateCropResHint(){
+    const w = Math.round(crop.w), h = Math.round(crop.h);
+    cropPxHint.textContent = `${w} × ${h}px`;
+    if (!natW || !natH) {
+      cropPctHint.textContent = '— of source';
+      cropPctHint.classList.remove('low');
+      return;
+    }
+    // percentage of source RESOLUTION = share of total pixels (megapixels)
+    // captured, not just linear width/height — matches what "resolution" means
+    const pct = ((w * h) / (natW * natH)) * 100;
+    const pctDisplay = pct < 1 ? pct.toFixed(1) : Math.round(pct);
+    cropPctHint.textContent = `${pctDisplay}% of source`;
+    cropPctHint.classList.toggle('low', pct < 25);
+  }
+
+  [cwInput, chInput, cxInput, cyInput].forEach(inp => {
+    inp.addEventListener('change', () => {
+      let w = parseInt(cwInput.value) || crop.w;
+      let h = parseInt(chInput.value) || crop.h;
+      if (aspectLock) {
+        // keep width authoritative when both changed together via typing width
+        h = Math.round(w / aspectLock);
+      }
+      crop.w = w; crop.h = h;
+      crop.x = parseInt(cxInput.value) || 0;
+      crop.y = parseInt(cyInput.value) || 0;
+      syncCropBoxFromModel();
+      updateInputs();
+      renderOutput();
+    });
+  });
+
+  document.querySelectorAll('.aspect-row [data-ratio]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.aspect-row [data-ratio]').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      aspectLock = parseFloat(chip.dataset.ratio);
+      if (aspectLock) {
+        const cx = crop.x + crop.w/2, cy = crop.y + crop.h/2;
+        let w = crop.w;
+        let h = Math.round(w / aspectLock);
+        if (h > natH) { h = natH; w = Math.round(h * aspectLock); }
+        if (w > natW) { w = natW; h = Math.round(w / aspectLock); }
+        crop.w = w; crop.h = h;
+        crop.x = Math.round(cx - w/2);
+        crop.y = Math.round(cy - h/2);
+        syncCropBoxFromModel();
+        updateInputs();
+        renderOutput();
+      }
+    });
+  });
+
+  // ---------- drag / resize ----------
+  let dragMode = null; // 'move' | 'nw' | 'ne' | 'sw' | 'se'
+  let dragStart = {x:0, y:0};
+  let cropStart = {x:0,y:0,w:0,h:0};
+
+  cropBox.addEventListener('mousedown', e => {
+    if (e.target.classList.contains('handle')) {
+      dragMode = [...e.target.classList].find(c => ['nw','ne','sw','se'].includes(c));
+    } else {
+      dragMode = 'move';
+    }
+    dragStart = {x: e.clientX, y: e.clientY};
+    cropStart = {...crop};
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!dragMode) return;
+    const dxNat = dispToNat(e.clientX - dragStart.x);
+    const dyNat = dispToNat(e.clientY - dragStart.y);
+
+    if (dragMode === 'move') {
+      crop.x = cropStart.x + dxNat;
+      crop.y = cropStart.y + dyNat;
+    } else {
+      let {x,y,w,h} = cropStart;
+      if (dragMode.includes('w')) { x = cropStart.x + dxNat; w = cropStart.w - dxNat; }
+      if (dragMode.includes('e')) { w = cropStart.w + dxNat; }
+      if (dragMode.includes('n')) { y = cropStart.y + dyNat; h = cropStart.h - dyNat; }
+      if (dragMode.includes('s')) { h = cropStart.h + dyNat; }
+
+      if (aspectLock) {
+        // derive h from w to keep ratio, anchored appropriately
+        h = w / aspectLock;
+        if (dragMode.includes('n')) y = cropStart.y + cropStart.h - h;
+      }
+
+      if (w >= MIN_CROP) { crop.x = x; crop.w = w; }
+      if (h >= MIN_CROP) { crop.y = y; crop.h = h; }
+    }
+    syncCropBoxFromModel();
+    updateInputs();
+    renderOutput();
+  });
+
+  window.addEventListener('mouseup', () => { dragMode = null; });
+
+  // ---------- symmetry ----------
+  const symSourceOverlay = document.getElementById('symSourceOverlay');
+  function updateSymSourceOverlay(){
+    symSourceOverlay.classList.remove('show-x', 'show-y');
+    if (symmetry === 'x') symSourceOverlay.classList.add('show-x');
+    else if (symmetry === 'y') symSourceOverlay.classList.add('show-y');
+  }
+  document.querySelectorAll('.sym-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.sym-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      symmetry = btn.dataset.sym;
+      updateSymSourceOverlay();
+      renderOutput();
+    });
+  });
+
+  // ---------- color: toggles ----------
+  const toneToggle = document.getElementById('toneToggle');
+  const overlayToggle = document.getElementById('overlayToggle');
+  const grainToggle = document.getElementById('grainToggle');
+  const fisheyeToggle = document.getElementById('fisheyeToggle');
+  const accentToggle = document.getElementById('accentToggle');
+  const sectionTone = document.getElementById('section-tone');
+  const sectionOverlay = document.getElementById('section-overlay');
+  const sectionGrain = document.getElementById('section-grain');
+  const sectionFisheye = document.getElementById('section-fisheye');
+  const sectionAccent = document.getElementById('section-accent');
+
+  function setToneEnabled(on){
+    toneEnabled = on;
+    toneToggle.checked = on;
+    sectionTone.classList.toggle('disabled', !on);
+  }
+  function setOverlayEnabled(on){
+    overlayEnabled = on;
+    overlayToggle.checked = on;
+    sectionOverlay.classList.toggle('disabled', !on);
+  }
+  function setGrainEnabled(on){
+    grainEnabled = on;
+    grainToggle.checked = on;
+    sectionGrain.classList.toggle('disabled', !on);
+    if (!on) stopPreview();
+    updateRecordBtnState();
+  }
+  function setFisheyeEnabled(on){
+    fisheyeEnabled = on;
+    fisheyeToggle.checked = on;
+    sectionFisheye.classList.toggle('disabled', !on);
+  }
+  function setAccentEnabled(on){
+    accentEnabled = on;
+    accentToggle.checked = on;
+    sectionAccent.classList.toggle('disabled', !on);
+  }
+  toneToggle.addEventListener('change', () => { setToneEnabled(toneToggle.checked); renderOutput(); });
+  overlayToggle.addEventListener('change', () => { setOverlayEnabled(overlayToggle.checked); renderOutput(); });
+  grainToggle.addEventListener('change', () => { setGrainEnabled(grainToggle.checked); renderOutput(); });
+  fisheyeToggle.addEventListener('change', () => { setFisheyeEnabled(fisheyeToggle.checked); renderOutput(); });
+  accentToggle.addEventListener('change', () => { setAccentEnabled(accentToggle.checked); renderOutput(); });
+
+  // ---------- color: tone sliders ----------
+  const sliderBrightness = document.getElementById('sliderBrightness');
+  const sliderContrast = document.getElementById('sliderContrast');
+  const sliderSaturation = document.getElementById('sliderSaturation');
+  const valBrightness = document.getElementById('valBrightness');
+  const valContrast = document.getElementById('valContrast');
+  const valSaturation = document.getElementById('valSaturation');
+
+  function syncToneSliders(){
+    sliderBrightness.value = tone.brightness; valBrightness.textContent = tone.brightness;
+    sliderContrast.value = tone.contrast; valContrast.textContent = tone.contrast;
+    sliderSaturation.value = tone.saturation; valSaturation.textContent = tone.saturation;
+  }
+
+  sliderBrightness.addEventListener('input', () => { tone.brightness = +sliderBrightness.value; valBrightness.textContent = tone.brightness; renderOutput(); });
+  sliderContrast.addEventListener('input', () => { tone.contrast = +sliderContrast.value; valContrast.textContent = tone.contrast; renderOutput(); });
+  sliderSaturation.addEventListener('input', () => { tone.saturation = +sliderSaturation.value; valSaturation.textContent = tone.saturation; renderOutput(); });
+
+  // ---------- color: overlay controls ----------
+  const overlayColorInput = document.getElementById('overlayColor');
+  const blendModeSelect = document.getElementById('blendMode');
+  const sliderIntensity = document.getElementById('sliderIntensity');
+  const valIntensity = document.getElementById('valIntensity');
+  const dominantSwatches = document.getElementById('dominantSwatches');
+
+  overlayColorInput.addEventListener('input', () => {
+    overlay.color = overlayColorInput.value;
+    document.querySelectorAll('#dominantSwatches .swatch').forEach(s => s.classList.remove('active'));
+    renderOutput();
+  });
+  blendModeSelect.addEventListener('change', () => { overlay.blend = blendModeSelect.value; renderOutput(); });
+  sliderIntensity.addEventListener('input', () => {
+    overlay.intensity = +sliderIntensity.value;
+    valIntensity.textContent = overlay.intensity;
+    renderOutput();
+  });
+
+  // ---------- color: grain ----------
+  const sliderGrainIntensity = document.getElementById('sliderGrainIntensity');
+  const sliderGrainSize = document.getElementById('sliderGrainSize');
+  const valGrainIntensity = document.getElementById('valGrainIntensity');
+  const valGrainSize = document.getElementById('valGrainSize');
+  const sliderGrainDuration = document.getElementById('sliderGrainDuration');
+  const valGrainDuration = document.getElementById('valGrainDuration');
+  const grainFpsInput = document.getElementById('grainFpsInput');
+  const previewGrainBtn = document.getElementById('previewGrainBtn');
+  const recordGrainBtn = document.getElementById('recordGrainBtn');
+  const recordHint = document.getElementById('recordHint');
+
+  function syncGrainSliders(){
+    sliderGrainIntensity.value = grain.intensity; valGrainIntensity.textContent = grain.intensity;
+    sliderGrainSize.value = grain.size; valGrainSize.textContent = grain.size;
+    sliderGrainDuration.value = grain.duration; valGrainDuration.textContent = grain.duration;
+    grainFpsInput.value = grain.fps;
+  }
+
+  sliderGrainIntensity.addEventListener('input', () => { grain.intensity = +sliderGrainIntensity.value; valGrainIntensity.textContent = grain.intensity; renderOutput(); });
+  sliderGrainSize.addEventListener('input', () => {
+    grain.size = +sliderGrainSize.value;
+    valGrainSize.textContent = grain.size;
+    grainCache.key = ''; // size change invalidates the cached noise texture
+    renderOutput();
+  });
+  sliderGrainDuration.addEventListener('input', () => { grain.duration = +sliderGrainDuration.value; valGrainDuration.textContent = grain.duration; });
+
+  grainFpsInput.addEventListener('input', () => {
+    let v = parseInt(grainFpsInput.value, 10);
+    if (isNaN(v)) return;
+    grain.fps = Math.min(10, Math.max(2, v));
+  });
+  grainFpsInput.addEventListener('change', () => {
+    // snap the displayed value to the clamped one on blur
+    grainFpsInput.value = grain.fps;
+  });
+
+  // ---------- grain live preview ----------
+  // Same "re-roll every frame" trick as recording, but just a plain rAF loop —
+  // no MediaRecorder involved, so this works even in browsers where recording
+  // isn't supported. Throttled to grain.fps (via timestamp gating inside the
+  // rAF loop) so what you see here matches the cadence of a recorded export,
+  // rather than re-rolling at whatever rate the browser happens to repaint.
+  // Other sliders (intensity, size, and anything elsewhere in the pipeline)
+  // still take effect live while it plays, since each tick is a full ordinary
+  // renderOutput() call.
+  let previewing = false;
+  let previewRAF = null;
+
+  function stopPreview(){
+    if (!previewing) return;
+    previewing = false;
+    if (previewRAF !== null) cancelAnimationFrame(previewRAF);
+    previewRAF = null;
+    previewGrainBtn.textContent = '▶ preview live';
+    if (img) {
+      grainCache.key = ''; // leave a clean, freshly-rolled frame rather than stopping mid-shimmer
+      renderOutput();
+    }
+  }
+
+  function startPreview(){
+    if (!img || !grainEnabled || animating) return;
+    previewing = true;
+    previewGrainBtn.textContent = '■ stop preview';
+    let lastTick = 0;
+    function loop(ts){
+      if (!previewing) return;
+      const interval = 1000 / grain.fps;
+      if (ts - lastTick >= interval) {
+        lastTick = ts;
+        grainCache.key = '';
+        renderOutput();
+      }
+      previewRAF = requestAnimationFrame(loop);
+    }
+    previewRAF = requestAnimationFrame(loop);
+  }
+
+  previewGrainBtn.addEventListener('click', () => {
+    if (previewing) stopPreview(); else startPreview();
+  });
+
+  // ---------- grain loop recording ----------
+  // Records the live canvas to WebM via MediaRecorder while continuously
+  // re-rolling the grain texture at grain.fps (bypassing its normal cache,
+  // which exists specifically to stop it from moving during ordinary
+  // interactive use). Only grain animates — every other enabled effect stays
+  // static per-frame, just re-rendered as-is each tick since renderOutput()
+  // redraws everything.
+  const recordingSupported = !!(outputCanvas.captureStream && window.MediaRecorder);
+  let animating = false;
+
+  function updateRecordBtnState(){
+    previewGrainBtn.disabled = !img || !grainEnabled || animating;
+    if (!recordingSupported) {
+      recordGrainBtn.disabled = true;
+      recordHint.textContent = 'recording not supported in this browser';
+      return;
+    }
+    recordGrainBtn.disabled = !img || !grainEnabled || animating;
+    if (!img) recordHint.textContent = 'upload an image first';
+    else if (!grainEnabled) recordHint.textContent = 'enable grain above to record a loop';
+    else if (!animating) recordHint.textContent = '';
+  }
+
+  recordGrainBtn.addEventListener('click', async () => {
+    if (!img || !grainEnabled || animating || !recordingSupported) return;
+    stopPreview(); // don't run two competing re-roll loops at once
+    animating = true;
+    recordGrainBtn.disabled = true;
+    recordGrainBtn.textContent = 'Recording…';
+    recordHint.textContent = '0%';
+
+    const fps = grain.fps;
+    const durationMs = grain.duration * 1000;
+    const stream = outputCanvas.captureStream(fps);
+    let mimeType = 'video/webm;codecs=vp9';
+    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=vp8';
+    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+    const recorder = new MediaRecorder(stream, {mimeType});
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+
+    recorder.start();
+    const startTime = performance.now();
+    const frameInterval = 1000 / fps;
+    let lastTick = 0;
+    function loop(ts){
+      if (ts - lastTick >= frameInterval) {
+        lastTick = ts;
+        grainCache.key = ''; // force a fresh noise texture this frame
+        renderOutput();
+      }
+      const elapsed = performance.now() - startTime;
+      recordHint.textContent = `${Math.min(100, Math.round((elapsed / durationMs) * 100))}%`;
+      if (elapsed < durationMs) {
+        requestAnimationFrame(loop);
+      } else {
+        recorder.stop();
+      }
+    }
+    requestAnimationFrame(loop);
+
+    await stopped;
+    const blob = new Blob(chunks, {type: 'video/webm'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `brand-asset-grain-loop-${outputCanvas.width}x${outputCanvas.height}.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    animating = false;
+    recordGrainBtn.textContent = 'Record grain loop (.webm)';
+    grainCache.key = ''; // leave a clean, freshly-rolled frame on screen
+    renderOutput();
+    updateRecordBtnState();
+  });
+
+  updateRecordBtnState(); // set the correct initial disabled/hint state on page load
+
+  // ---------- distort: fisheye (pincushion-only) ----------
+  // Slider reads 0-100 and goes up for "more pincushion" — internally that's a
+  // negative strength value (the barrel/positive direction was removed), so the
+  // slider position is the negated, display-friendly view of the real number.
+  const sliderFisheye = document.getElementById('sliderFisheye');
+  const valFisheye = document.getElementById('valFisheye');
+
+  function syncFisheyeSlider(){
+    const displayVal = -fisheye.strength;
+    sliderFisheye.value = displayVal; valFisheye.textContent = displayVal;
+  }
+  sliderFisheye.addEventListener('input', () => {
+    fisheye.strength = -(+sliderFisheye.value);
+    valFisheye.textContent = sliderFisheye.value;
+    renderOutput();
+  });
+
+  // ---------- accent border ----------
+  const accentColorPicker = document.getElementById('accentColorPicker');
+  const accentColorSwatch = document.getElementById('accentColorSwatch');
+  const vibrantSwatches = document.getElementById('vibrantSwatches');
+  const sliderAccentSat = document.getElementById('sliderAccentSat');
+  const sliderAccentLum = document.getElementById('sliderAccentLum');
+  const valAccentSat = document.getElementById('valAccentSat');
+  const valAccentLum = document.getElementById('valAccentLum');
+  const accentWidthInput = document.getElementById('accentWidthInput');
+  const sliderAccentWidth = document.getElementById('sliderAccentWidth');
+  const valAccentWidth = document.getElementById('valAccentWidth');
+  accentColorSwatch.style.background = accent.color; // reflect the default before any image loads
+
+  function syncAccentSliders(){
+    accentColorPicker.value = accent.color;
+    accentColorSwatch.style.background = accent.color;
+    sliderAccentSat.value = accent.satShift; valAccentSat.textContent = accent.satShift;
+    sliderAccentLum.value = accent.lumShift; valAccentLum.textContent = accent.lumShift;
+    accentWidthInput.value = accent.width;
+    sliderAccentWidth.value = accent.width; valAccentWidth.textContent = accent.width;
+    document.querySelectorAll('#accentSideRow [data-side]').forEach(chip => {
+      chip.classList.toggle('active', !!accent.sides[chip.dataset.side]);
+    });
+    document.querySelectorAll('#vibrantSwatches .swatch').forEach(s => s.classList.remove('active'));
+  }
+
+  accentColorPicker.addEventListener('input', () => {
+    accent.color = accentColorPicker.value;
+    accentColorSwatch.style.background = accent.color;
+    document.querySelectorAll('#vibrantSwatches .swatch').forEach(s => s.classList.remove('active'));
+    renderOutput();
+  });
+  sliderAccentSat.addEventListener('input', () => { accent.satShift = +sliderAccentSat.value; valAccentSat.textContent = accent.satShift; renderOutput(); });
+  sliderAccentLum.addEventListener('input', () => { accent.lumShift = +sliderAccentLum.value; valAccentLum.textContent = accent.lumShift; renderOutput(); });
+
+  // sides accumulate independently — any combination of top/right/bottom/left can be active
+  document.querySelectorAll('#accentSideRow [data-side]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const side = chip.dataset.side;
+      accent.sides[side] = !accent.sides[side];
+      chip.classList.toggle('active', accent.sides[side]);
+      renderOutput();
+    });
+  });
+
+  // slider and number input both drive accent.width and stay in sync with each other
+  function setAccentWidth(v){
+    v = Math.min(200, Math.max(1, v));
+    accent.width = v;
+    accentWidthInput.value = v;
+    sliderAccentWidth.value = v;
+    valAccentWidth.textContent = v;
+    renderOutput();
+  }
+  sliderAccentWidth.addEventListener('input', () => { setAccentWidth(+sliderAccentWidth.value); });
+  accentWidthInput.addEventListener('input', () => {
+    const v = parseInt(accentWidthInput.value, 10);
+    if (isNaN(v)) return;
+    setAccentWidth(v);
+  });
+  accentWidthInput.addEventListener('change', () => {
+    // snap the field's displayed value to the clamped one on blur, in case the
+    // user typed something out of range
+    accentWidthInput.value = accent.width;
+  });
+
+  function rgbToHex(r,g,b){
+    return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+  }
+  function hexToRgb(hex){
+    const n = parseInt(hex.slice(1), 16);
+    return {r:(n>>16)&255, g:(n>>8)&255, b:n&255};
+  }
+  // r,g,b in 0-255 -> h in [0,360), s,l in [0,1]
+  function rgbToHsl(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h,s; const l=(max+min)/2;
+    if (max===min){ h=0; s=0; }
+    else{
+      const d = max-min;
+      s = l>0.5 ? d/(2-max-min) : d/(max+min);
+      switch(max){
+        case r: h=(g-b)/d+(g<b?6:0); break;
+        case g: h=(b-r)/d+2; break;
+        default: h=(r-g)/d+4;
+      }
+      h*=60;
+    }
+    return [h,s,l];
+  }
+  // h in [0,360), s,l in [0,1] -> r,g,b in 0-255
+  function hslToRgb(h,s,l){
+    h = ((h%360)+360)%360;
+    if (s===0){ const v=Math.round(l*255); return [v,v,v]; }
+    const hue2rgb=(p,q,t)=>{
+      if(t<0)t+=1; if(t>1)t-=1;
+      if(t<1/6) return p+(q-p)*6*t;
+      if(t<1/2) return q;
+      if(t<2/3) return p+(q-p)*(2/3-t)*6;
+      return p;
+    };
+    const q = l<0.5 ? l*(1+s) : l+s-l*s;
+    const p = 2*l-q;
+    const hk = h/360;
+    const r = hue2rgb(p,q,hk+1/3);
+    const g = hue2rgb(p,q,hk);
+    const b = hue2rgb(p,q,hk-1/3);
+    return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+  }
+
+  // apply the saturation/luminance sliders to the picked accent color.
+  // Saturation works in HSL, same as the Tone panel. Luminance mixes each RGB
+  // channel toward white (positive) or black (negative) by the same fraction —
+  // a tint/shade blend, not a luma-weighted transform.
+  function getAdjustedAccentColor(){
+    const {r,g,b} = hexToRgb(accent.color);
+    let [h,s,l] = rgbToHsl(r,g,b);
+    s = Math.min(1, Math.max(0, s + accent.satShift / 100));
+    let [nr,ng,nb] = hslToRgb(h,s,l);
+
+    const lumT = accent.lumShift / 100; // -1..1
+    if (lumT > 0) {
+      nr = nr + (255 - nr) * lumT;
+      ng = ng + (255 - ng) * lumT;
+      nb = nb + (255 - nb) * lumT;
+    } else if (lumT < 0) {
+      const k = 1 + lumT; // lumT negative, k in 0..1
+      nr = nr * k; ng = ng * k; nb = nb * k;
+    }
+
+    return rgbToHex(
+      Math.round(Math.min(255, Math.max(0, nr))),
+      Math.round(Math.min(255, Math.max(0, ng))),
+      Math.round(Math.min(255, Math.max(0, nb)))
+    );
+  }
+
+  // vibrance-ranked swatches: same quantized-bucket approach as the dominant-color
+  // extraction, but ranked by saturation (biased toward mid-lightness, since very
+  // dark/light pixels read as washed-out even when technically saturated) instead
+  // of raw pixel frequency — and low-population buckets are filtered out so a
+  // handful of noise pixels can't out-rank a real vibrant region.
+  function populateVibrantSwatches(image){
+    const size = 100;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const cctx = c.getContext('2d');
+    cctx.drawImage(image, 0, 0, size, size);
+    const data = cctx.getImageData(0, 0, size, size).data;
+
+    const step = 24;
+    const buckets = {};
+    let totalSamples = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i+3] < 128) continue;
+      totalSamples++;
+      const r = Math.round(data[i] / step) * step;
+      const g = Math.round(data[i+1] / step) * step;
+      const b = Math.round(data[i+2] / step) * step;
+      const key = r + ',' + g + ',' + b;
+      if (!buckets[key]) buckets[key] = {count:0, r:0, g:0, b:0};
+      buckets[key].count++;
+      buckets[key].r += data[i];
+      buckets[key].g += data[i+1];
+      buckets[key].b += data[i+2];
+    }
+
+    const minCount = Math.max(4, totalSamples * 0.004);
+    const top = Object.values(buckets)
+      .filter(b => b.count >= minCount)
+      .map(b => {
+        const r = Math.round(b.r / b.count), g = Math.round(b.g / b.count), bl = Math.round(b.b / b.count);
+        const [, s, l] = rgbToHsl(r, g, bl);
+        const vibrance = s * (1 - Math.abs(l - 0.5) * 1.4);
+        return {hex: rgbToHex(r, g, bl), vibrance};
+      })
+      .sort((a, b) => b.vibrance - a.vibrance)
+      .slice(0, 5)
+      .map(v => v.hex);
+
+    vibrantSwatches.innerHTML = '';
+    top.forEach(hex => {
+      const btn = document.createElement('button');
+      btn.className = 'swatch';
+      btn.style.background = hex;
+      btn.title = hex;
+      btn.addEventListener('click', () => {
+        accent.color = hex;
+        accentColorPicker.value = hex;
+        accentColorSwatch.style.background = hex;
+        document.querySelectorAll('#vibrantSwatches .swatch').forEach(s => s.classList.remove('active'));
+        btn.classList.add('active');
+        renderOutput();
+      });
+      vibrantSwatches.appendChild(btn);
+    });
+  }
+
+  // simple dominant-color extraction: downscale, quantize, bucket, sort by frequency
+  function populateDominantSwatches(image){
+    const size = 100;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const cctx = c.getContext('2d');
+    cctx.drawImage(image, 0, 0, size, size);
+    const data = cctx.getImageData(0, 0, size, size).data;
+
+    const step = 24; // quantization bucket width
+    const buckets = {};
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i+3] < 128) continue; // skip transparent
+      const r = Math.round(data[i] / step) * step;
+      const g = Math.round(data[i+1] / step) * step;
+      const b = Math.round(data[i+2] / step) * step;
+      const key = r + ',' + g + ',' + b;
+      if (!buckets[key]) buckets[key] = {count:0, r:0, g:0, b:0};
+      buckets[key].count++;
+      buckets[key].r += data[i];
+      buckets[key].g += data[i+1];
+      buckets[key].b += data[i+2];
+    }
+
+    const top = Object.values(buckets)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+      .map(b => rgbToHex(
+        Math.round(b.r / b.count),
+        Math.round(b.g / b.count),
+        Math.round(b.b / b.count)
+      ));
+
+    dominantSwatches.innerHTML = '';
+    top.forEach(hex => {
+      const btn = document.createElement('button');
+      btn.className = 'swatch';
+      btn.style.background = hex;
+      btn.title = hex;
+      btn.addEventListener('click', () => {
+        overlay.color = hex;
+        overlayColorInput.value = hex;
+        document.querySelectorAll('#dominantSwatches .swatch').forEach(s => s.classList.remove('active'));
+        btn.classList.add('active');
+        renderOutput();
+      });
+      dominantSwatches.appendChild(btn);
+    });
+  }
+
+  // ---------- render output at full native resolution ----------
+  function renderOutput(){
+    if (!img) return;
+    clampCrop();
+    const cw = Math.round(crop.w), ch = Math.round(crop.h);
+    outputCanvas.width = cw;
+    outputCanvas.height = ch;
+    octx.clearRect(0,0,cw,ch);
+
+    const sx = crop.x, sy = crop.y;
+
+    // tone filter (applies to every drawImage call below)
+    if (toneEnabled) {
+      octx.filter = `brightness(${100 + tone.brightness}%) contrast(${100 + tone.contrast}%) saturate(${100 + tone.saturation}%)`;
+    } else {
+      octx.filter = 'none';
+    }
+
+    if (symmetry === 'none') {
+      octx.drawImage(img, sx, sy, cw, ch, 0, 0, cw, ch);
+    } else if (symmetry === 'x') {
+      const hw = cw / 2;
+      octx.drawImage(img, sx, sy, hw, ch, 0, 0, hw, ch);
+      octx.save();
+      octx.translate(cw, 0); octx.scale(-1, 1);
+      octx.drawImage(img, sx, sy, hw, ch, 0, 0, hw, ch);
+      octx.restore();
+    } else if (symmetry === 'y') {
+      const hh = ch / 2;
+      octx.drawImage(img, sx, sy, cw, hh, 0, 0, cw, hh);
+      octx.save();
+      octx.translate(0, ch); octx.scale(1, -1);
+      octx.drawImage(img, sx, sy, cw, hh, 0, 0, cw, hh);
+      octx.restore();
+    }
+
+    octx.filter = 'none'; // never let filter bleed into the passes below
+
+    // distort: full-frame pincushion warp
+    if (fisheyeEnabled) {
+      applyFisheye(cw, ch);
+    }
+
+    // color overlay (channel tint), composited on top of whatever tone/symmetry produced above
+    if (overlayEnabled && overlay.intensity > 0) {
+      octx.save();
+      octx.globalCompositeOperation = overlay.blend;
+      octx.globalAlpha = overlay.intensity / 100;
+      octx.fillStyle = overlay.color;
+      octx.fillRect(0, 0, cw, ch);
+      octx.restore();
+    }
+
+    // grain: monochrome noise texture, blended on top of everything else
+    if (grainEnabled && grain.intensity > 0) {
+      applyGrain(cw, ch);
+    }
+
+    // accent border: frame of any combination of sides — last step, since it
+    // extends the canvas rather than tinting existing pixels
+    let finalCw = cw, finalCh = ch;
+    if (accentEnabled) {
+      const dims = applyAccentBorder(cw, ch);
+      finalCw = dims.w;
+      finalCh = dims.h;
+    }
+
+    outDims.textContent = `${finalCw} × ${finalCh}px`;
+    outSym.textContent = symmetry === 'none' ? 'no symmetry' : symmetry.toUpperCase() + ' mirror';
+    downloadBtn.disabled = false;
+    updateExportDimsHint();
+  }
+
+  // appends a frame in the (adjusted) accent color around whichever sides are
+  // active, each accent.width px thick. Snapshots the fully-processed image
+  // first since resizing the canvas clears it, fills the whole new canvas with
+  // the border color (cheapest way to get clean corners), then stamps the
+  // original content back in at the (left, top) offset.
+  function applyAccentBorder(cw, ch){
+    const s = accent.sides;
+    const left = s.left ? accent.width : 0;
+    const right = s.right ? accent.width : 0;
+    const top = s.top ? accent.width : 0;
+    const bottom = s.bottom ? accent.width : 0;
+
+    if (!left && !right && !top && !bottom) {
+      return {w: cw, h: ch}; // toggle is on but no side selected — no-op
+    }
+
+    const snapshot = octx.getImageData(0, 0, cw, ch);
+    const newW = cw + left + right;
+    const newH = ch + top + bottom;
+    outputCanvas.width = newW;
+    outputCanvas.height = newH;
+    octx.fillStyle = getAdjustedAccentColor();
+    octx.fillRect(0, 0, newW, newH);
+    octx.putImageData(snapshot, left, top);
+    return {w: newW, h: newH};
+  }
+
+  // bilinear sample from a raw pixel array (edge-clamped) — shared by the warp passes below
+  function sampleBilinearFrom(data, w, h, x, y){
+    if (x < 0) x = 0; if (x > w - 1) x = w - 1;
+    if (y < 0) y = 0; if (y > h - 1) y = h - 1;
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+    const fx = x - x0, fy = y - y0;
+    const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+    const out = [0,0,0,0];
+    for (let c = 0; c < 4; c++) {
+      const top = data[i00+c] * (1-fx) + data[i10+c] * fx;
+      const bot = data[i01+c] * (1-fx) + data[i11+c] * fx;
+      out[c] = top * (1-fy) + bot * fy;
+    }
+    return out;
+  }
+
+  // full-frame radial lens distortion (barrel/pincushion), no clipping — corners included
+  function applyFisheye(cw, ch){
+    const imageData = octx.getImageData(0, 0, cw, ch);
+    const src = imageData.data;
+    const out = octx.createImageData(cw, ch);
+    const k = (fisheye.strength / 100) * 0.6; // -0.6..0.6
+    const cx = cw/2, cy = ch/2, halfW = cw/2, halfH = ch/2;
+
+    for (let oy = 0; oy < ch; oy++){
+      for (let ox = 0; ox < cw; ox++){
+        const nx = (ox - cx) / halfW, ny = (oy - cy) / halfH;
+        const r2 = nx*nx + ny*ny;
+        const factor = 1 + k * r2;
+        const px = sampleBilinearFrom(src, cw, ch, cx + nx*factor*halfW, cy + ny*factor*halfH);
+        const idx = (oy * cw + ox) * 4;
+        out.data[idx]=px[0]; out.data[idx+1]=px[1]; out.data[idx+2]=px[2]; out.data[idx+3]=px[3];
+      }
+    }
+    octx.putImageData(out, 0, 0);
+  }
+
+  // cached monochrome noise texture, regenerated only when crop size or grain size changes
+  function getGrainCanvas(cw, ch, size){
+    const key = `${cw}x${ch}@${size}`;
+    if (grainCache.canvas && grainCache.key === key) return grainCache.canvas;
+    const nw = Math.max(1, Math.round(cw / size));
+    const nh = Math.max(1, Math.round(ch / size));
+    const c = document.createElement('canvas');
+    c.width = nw; c.height = nh;
+    const gctx = c.getContext('2d');
+    const noiseData = gctx.createImageData(nw, nh);
+    for (let i = 0; i < noiseData.data.length; i += 4) {
+      const v = Math.floor(Math.random() * 256);
+      noiseData.data[i] = v; noiseData.data[i+1] = v; noiseData.data[i+2] = v; noiseData.data[i+3] = 255;
+    }
+    gctx.putImageData(noiseData, 0, 0);
+    grainCache = {canvas: c, key};
+    return c;
+  }
+
+  function applyGrain(cw, ch){
+    const noise = getGrainCanvas(cw, ch, grain.size);
+    octx.save();
+    octx.globalCompositeOperation = 'overlay';
+    octx.globalAlpha = grain.intensity / 100;
+    octx.imageSmoothingEnabled = false; // keep grain cells crisp when upscaled from the cached noise tile
+    octx.drawImage(noise, 0, 0, cw, ch);
+    octx.restore();
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    // At 1x, export the canvas as-is. Above that, draw it onto a larger canvas
+    // with high-quality smoothing — this is interpolated upscaling (stretching
+    // existing pixel data), not added detail. It's useful for hitting a minimum
+    // pixel-dimension requirement; it won't make a low-res source look sharper.
+    let exportCanvas = outputCanvas;
+    if (downloadScale > 1) {
+      exportCanvas = document.createElement('canvas');
+      exportCanvas.width = outputCanvas.width * downloadScale;
+      exportCanvas.height = outputCanvas.height * downloadScale;
+      const ex = exportCanvas.getContext('2d');
+      ex.imageSmoothingEnabled = true;
+      ex.imageSmoothingQuality = 'high';
+      ex.drawImage(outputCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+    }
+
+    exportCanvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const tags = [toneEnabled ? 'tone' : null, overlayEnabled ? 'overlay' : null, fisheyeEnabled ? 'fisheye' : null, grainEnabled ? 'grain' : null, accentEnabled ? 'border' : null].filter(Boolean).join('-');
+      const colorTag = tags ? `-${tags}` : '';
+      const scaleTag = downloadScale > 1 ? `-${downloadScale}x` : '';
+      a.download = `brand-asset-${symmetry}${colorTag}${scaleTag}-${exportCanvas.width}x${exportCanvas.height}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  });
+
+  resetLink.addEventListener('click', () => {
+    img = null;
+    stage.classList.remove('active');
+    dropzone.style.display = 'flex';
+    changeImageBtn.style.display = 'none';
+    fileMeta.textContent = '';
+    fileInput.value = '';
+    downloadBtn.disabled = true;
+    outDims.textContent = '— × —';
+    octx.clearRect(0,0,outputCanvas.width, outputCanvas.height);
+    natW = 0; natH = 0;
+    cwInput.value = ''; chInput.value = ''; cxInput.value = ''; cyInput.value = '';
+    cropPxHint.textContent = '— × —px';
+    cropPctHint.textContent = '— of source';
+    cropPctHint.classList.remove('low');
+    downloadScale = 1;
+    document.querySelectorAll('#scaleRow [data-scale]').forEach(c => c.classList.toggle('active', c.dataset.scale === '1'));
+    exportDims.textContent = '— × —';
+    tone = {brightness:0, contrast:0, saturation:0};
+    overlay = {color:'#ff8a34', blend:'multiply', intensity:0};
+    grain = {intensity:30, size:1, duration:2, fps:8};
+    grainCache = {canvas:null, key:''};
+    fisheye = {strength:-40};
+    accent = {color:'#FBFF2D', satShift:0, lumShift:0, width:20, sides:{top:false,right:false,bottom:true,left:false}};
+    setToneEnabled(false);
+    setOverlayEnabled(false);
+    setGrainEnabled(false);
+    setFisheyeEnabled(false);
+    setAccentEnabled(false);
+    syncToneSliders();
+    syncGrainSliders();
+    syncFisheyeSlider();
+    syncAccentSliders();
+    sliderIntensity.value = 0;
+    valIntensity.textContent = 0;
+  });
+})();
+</script>
+</body>
+</html>
